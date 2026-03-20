@@ -5,6 +5,15 @@
  * MCP server that connects Claude Code to a Telegram topic (forum thread).
  * One instance per project — each knows its chat_id + thread_id.
  *
+ * Architecture: rather than polling Telegram's getUpdates directly (which
+ * causes 409 Conflict when multiple projects share one bot token), this server
+ * reads from a queue file written by a routing bot:
+ *
+ *   /tmp/tg-queue-{THREAD_ID}.jsonl
+ *
+ * The routing bot holds the single getUpdates long-poll and fans messages out
+ * to per-topic queue files. Each MCP server instance tails its own queue file.
+ *
  * Config (env or ~/.claude/channels/telegram/.env):
  *   TELEGRAM_BOT_TOKEN  — bot token
  *   TELEGRAM_CHAT_ID    — supergroup chat id (negative number)
@@ -189,76 +198,82 @@ type TgMessage = {
 
 const messageHistory: TgMessage[] = []
 
-// ── Telegram poller ───────────────────────────────────────────────────────────
+// ── Queue file reader (routing bot writes here, we consume) ──────────────────
+// The routing bot holds the single getUpdates long-poll and fans messages out
+// to per-topic queue files (/tmp/tg-queue-{THREAD_ID}.jsonl). This avoids
+// 409 Conflict errors when multiple projects share one bot token.
 
-let lastUpdateId = 0
+const QUEUE_FILE = `/tmp/tg-queue-${THREAD_ID}.jsonl`
+
+type QueueEntry = {
+  text: string
+  user: string
+  message_id: number
+  thread_id: number
+  chat_id: number
+  ts: number
+}
 
 async function poll(): Promise<void> {
+  // Track file position so we only read new lines
+  let filePos = 0
+
+  // If queue file exists, start at end (don't replay old messages)
+  try {
+    const stat = Bun.file(QUEUE_FILE)
+    if (await stat.exists()) {
+      filePos = (await stat.arrayBuffer()).byteLength
+    }
+  } catch {}
+
   while (true) {
     try {
-      const res = await fetch(`${BASE}/getUpdates?offset=${lastUpdateId + 1}&timeout=10&allowed_updates=["message"]`, {
-        signal: AbortSignal.timeout(15_000),
-      })
-      const data = await res.json() as {
-        ok: boolean
-        result: Array<{
-          update_id: number
-          message?: {
-            message_id: number
-            from?: { first_name?: string; is_bot?: boolean }
-            chat: { id: number }
-            message_thread_id?: number
-            text?: string
-            date: number
+      const file = Bun.file(QUEUE_FILE)
+      if (!(await file.exists())) { await Bun.sleep(500); continue }
+
+      const buf   = await file.arrayBuffer()
+      const total = buf.byteLength
+
+      if (total > filePos) {
+        const newBytes = new Uint8Array(buf, filePos, total - filePos)
+        const newText  = new TextDecoder().decode(newBytes)
+        filePos = total
+
+        for (const line of newText.split('\n')) {
+          if (!line.trim()) continue
+          try {
+            const entry = JSON.parse(line) as QueueEntry
+            const { text, user, message_id, ts } = entry
+            const isoTs = new Date(ts * 1000).toISOString()
+
+            messageHistory.push({ message_id, user, text, ts: isoTs })
+            if (messageHistory.length > 100) messageHistory.shift()
+
+            process.stderr.write(`[telegram] ${user}: ${text}\n`)
+
+            void mcp.notification({
+              method: 'notifications/claude/channel',
+              params: {
+                content: text,
+                meta: {
+                  chat_id:    String(CHAT_ID),
+                  thread_id:  String(THREAD_ID),
+                  message_id,
+                  user,
+                  ts:         isoTs,
+                },
+              },
+            })
+          } catch (e) {
+            process.stderr.write(`[telegram] parse error: ${e}\n`)
           }
-        }>
-      }
-
-      if (!data.ok) { await Bun.sleep(2000); continue }
-
-      for (const update of data.result) {
-        lastUpdateId = update.update_id
-        const msg = update.message
-        if (!msg) continue
-
-        // Only our topic, non-bot messages
-        if (
-          msg.chat.id !== parseInt(CHAT_ID!) ||
-          msg.message_thread_id !== THREAD_ID ||
-          msg.from?.is_bot
-        ) continue
-
-        const text = msg.text ?? ''
-        if (!text) continue
-
-        const user = msg.from?.first_name ?? 'user'
-        const ts   = new Date(msg.date * 1000).toISOString()
-
-        // Store in history
-        messageHistory.push({ message_id: msg.message_id, user, text, ts })
-        if (messageHistory.length > 100) messageHistory.shift()
-
-        // Notify Claude — this triggers a new LLM turn
-        void mcp.notification({
-          method: 'notifications/claude/channel',
-          params: {
-            content: text,
-            meta: {
-              chat_id:    CHAT_ID,
-              thread_id:  String(THREAD_ID),
-              message_id: msg.message_id,
-              user,
-              ts,
-            },
-          },
-        })
-
-        process.stderr.write(`[telegram] ${user}: ${text}\n`)
+        }
       }
     } catch (err) {
       process.stderr.write(`[telegram] poll error: ${err}\n`)
-      await Bun.sleep(2000)
     }
+
+    await Bun.sleep(500)
   }
 }
 
