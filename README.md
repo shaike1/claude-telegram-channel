@@ -28,7 +28,7 @@ You → Telegram topic → routing bot → queue file → MCP server → Claude 
 - [Bun](https://bun.sh) — `curl -fsSL https://bun.sh/install | bash`
 - A Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - A Telegram **Supergroup** with **Topics** enabled
-- The [routing bot](https://github.com/shaicake/tmux-telegram-bridge) running to fan out messages
+- The [routing bot](https://github.com/shaike1/tmux-telegram) running to fan out messages
 
 > **Critical: bun must be in system PATH**
 >
@@ -74,7 +74,7 @@ TELEGRAM_CHAT_ID=-1001234567890
 
 ### 5. Start the routing bot
 
-The routing bot must be running to fan messages into queue files. See the [tmux-telegram-bridge](https://github.com/shaicake/tmux-telegram-bridge) companion project.
+The routing bot must be running to fan messages into queue files. See the [tmux-telegram](https://github.com/shaike1/tmux-telegram) companion project.
 
 ### 6. Add to your project
 
@@ -151,7 +151,7 @@ Claude loads the MCP server automatically, connects to your Telegram topic, and 
 
 ## Multi-project setup
 
-For managing multiple projects across multiple servers from one Telegram group, the [tmux-telegram-bridge](https://github.com/shaicake/tmux-telegram-bridge) companion bot:
+For managing multiple projects across multiple servers from one Telegram group, the [tmux-telegram](https://github.com/shaike1/tmux-telegram) companion bot:
 
 - Runs the routing bot that fans `getUpdates` into per-topic queue files
 - Creates one Telegram topic per project automatically

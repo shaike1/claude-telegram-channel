@@ -148,7 +148,7 @@ Would have saved me an hour.
 
 Open source, MIT licensed.
 
-→ github.com/shaicake/claude-telegram-channel
+→ github.com/shaike1/claude-telegram-channel
 
 If you manage remote servers, run long Claude sessions, or just want to stop SSHing in to check on things — this is for you.
 
@@ -183,7 +183,7 @@ The solution is a routing bot that holds the single long-poll and writes incomin
 - Manage multiple projects from one Telegram group, each in its own topic
 - Full Claude Code capabilities: file editing, shell commands, git, deploys
 
-**It's open source (MIT):** github.com/shaicake/claude-telegram-channel
+**It's open source (MIT):** github.com/shaike1/claude-telegram-channel
 
 Built with Bun, the MCP SDK, and a healthy frustration with SSH. Happy to discuss the architecture in the comments.
 
